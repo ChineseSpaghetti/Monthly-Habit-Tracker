@@ -6,8 +6,11 @@ export type AuthState = {
   loading: boolean;
   user: User | null;
   authError: string | null;
+  passwordRecovery: boolean;
   signInWithPassword: (email: string, password: string) => Promise<void>;
   signUpWithPassword: (email: string, password: string) => Promise<void>;
+  resetPasswordForEmail: (email: string) => Promise<void>;
+  updatePassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -15,6 +18,7 @@ export function useAuth(): AuthState {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -40,6 +44,9 @@ export function useAuth(): AuthState {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (_event === "PASSWORD_RECOVERY") {
+        setPasswordRecovery(true);
+      }
       setUser(session?.user ?? null);
       setLoading(false);
     });
@@ -76,6 +83,32 @@ export function useAuth(): AuthState {
     }
   };
 
+  const resetPasswordForEmail = async (email: string) => {
+    setAuthError(null);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
+
+    if (error) {
+      setAuthError(error.message);
+      throw error;
+    }
+  };
+
+  const updatePassword = async (password: string) => {
+    setAuthError(null);
+    const { error } = await supabase.auth.updateUser({
+      password,
+    });
+
+    if (error) {
+      setAuthError(error.message);
+      throw error;
+    }
+
+    setPasswordRecovery(false);
+  };
+
   const signOut = async () => {
     setAuthError(null);
     const { error } = await supabase.auth.signOut();
@@ -89,8 +122,11 @@ export function useAuth(): AuthState {
     loading,
     user,
     authError,
+    passwordRecovery,
     signInWithPassword,
     signUpWithPassword,
+    resetPasswordForEmail,
+    updatePassword,
     signOut,
   };
 }

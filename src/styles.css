@@ -249,6 +249,22 @@ input:disabled {
   border-color: var(--line);
 }
 
+.text-button {
+  align-self: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.text-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .grid-card {
   min-height: 402px;
   padding: 15px 10px 17px;

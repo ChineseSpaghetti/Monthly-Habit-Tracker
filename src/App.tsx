@@ -219,6 +219,16 @@ function App() {
         authError={auth.authError}
         onSignIn={auth.signInWithPassword}
         onSignUp={auth.signUpWithPassword}
+        onResetPassword={auth.resetPasswordForEmail}
+      />
+    );
+  }
+
+  if (auth.passwordRecovery) {
+    return (
+      <ChangePasswordScreen
+        authError={auth.authError}
+        onSave={auth.updatePassword}
       />
     );
   }
@@ -338,10 +348,12 @@ function LoginScreen({
   authError,
   onSignIn,
   onSignUp,
+  onResetPassword,
 }: {
   authError: string | null;
   onSignIn: (email: string, password: string) => Promise<void>;
   onSignUp: (email: string, password: string) => Promise<void>;
+  onResetPassword: (email: string) => Promise<void>;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -366,6 +378,26 @@ function LoginScreen({
       }
     } catch (authActionError) {
       setError(getErrorMessage(authActionError));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setError("Enter your email first.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await onResetPassword(trimmedEmail);
+      setSuccess("Password change link sent. Check your email.");
+    } catch (resetError) {
+      setError(getErrorMessage(resetError));
     } finally {
       setLoading(false);
     }
@@ -409,6 +441,88 @@ function LoginScreen({
             onClick={(event) => handleAuth(event, "sign-up")}
           >
             create account
+          </button>
+          <button
+            className="text-button"
+            type="button"
+            disabled={loading}
+            onClick={handleResetPassword}
+          >
+            change password
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function ChangePasswordScreen({
+  authError,
+  onSave,
+}: {
+  authError: string | null;
+  onSave: (password: string) => Promise<void>;
+}) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setSuccess(null);
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await onSave(password);
+      setSuccess("Password updated. You can continue.");
+    } catch (updateError) {
+      setError(getErrorMessage(updateError));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main className="app-main setup-main">
+      <section className="screen">
+        <ScreenHeader title="Change password" subtitle="set a new password" />
+        <form className="auth-card" onSubmit={submit}>
+          <h2>New password</h2>
+          <p>Enter a new password for this account.</p>
+          <label htmlFor="new-password">new password</label>
+          <input
+            id="new-password"
+            type="password"
+            value={password}
+            required
+            minLength={6}
+            disabled={loading}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="at least 6 characters"
+          />
+          <label htmlFor="confirm-password">confirm password</label>
+          <input
+            id="confirm-password"
+            type="password"
+            value={confirmPassword}
+            required
+            minLength={6}
+            disabled={loading}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            placeholder="repeat password"
+          />
+          {(error || authError) && <div className="error-panel">{error ?? authError}</div>}
+          {success && <div className="success-panel">{success}</div>}
+          <button className="primary-button" type="submit" disabled={loading}>
+            {loading ? "saving..." : "save password"}
           </button>
         </form>
       </section>
