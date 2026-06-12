@@ -440,7 +440,6 @@ function LoginScreen({
         {mode === "sign-in" ? (
           <form className="auth-card" onSubmit={handleSignIn}>
             <h2>Email password login</h2>
-            <p>Use a password for MVP testing without magic-link email limits.</p>
             <label htmlFor="login-email">email</label>
             <input
               id="login-email"
