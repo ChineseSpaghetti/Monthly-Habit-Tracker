@@ -519,6 +519,12 @@ input:disabled {
   line-height: 1.55;
 }
 
+.password-field {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
 .auth-card input {
   width: 100%;
   min-height: 56px;
@@ -532,6 +538,35 @@ input:disabled {
 
 .auth-card input:focus {
   border-color: var(--ink);
+}
+
+.password-input-wrap {
+  position: relative;
+}
+
+.password-input-wrap input {
+  padding-right: 52px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.password-toggle:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
 }
 
 .error-panel,

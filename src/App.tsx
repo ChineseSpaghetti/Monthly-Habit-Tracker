@@ -355,27 +355,42 @@ function LoginScreen({
   onSignUp: (email: string, password: string) => Promise<void>;
   onResetPassword: (email: string) => Promise<void>;
 }) {
+  const [mode, setMode] = useState<"sign-in" | "create-account">("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const handleAuth = async (
-    event: { preventDefault: () => void },
-    action: "sign-in" | "sign-up",
-  ) => {
+  const handleSignIn = async (event: FormEvent) => {
     event.preventDefault();
     setLoading(true);
     setError(null);
     setSuccess(null);
     try {
-      if (action === "sign-up") {
-        await onSignUp(email.trim(), password);
-        setSuccess("Account created. You are signed in.");
-      } else {
-        await onSignIn(email.trim(), password);
-      }
+      await onSignIn(email.trim(), password);
+    } catch (authActionError) {
+      setError(getErrorMessage(authActionError));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateAccount = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setSuccess(null);
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await onSignUp(email.trim(), password);
+      setSuccess("Account created. You are signed in.");
     } catch (authActionError) {
       setError(getErrorMessage(authActionError));
     } finally {
@@ -403,54 +418,113 @@ function LoginScreen({
     }
   };
 
+  const showSignIn = () => {
+    setMode("sign-in");
+    setError(null);
+    setSuccess(null);
+  };
+
+  const showCreateAccount = () => {
+    setMode("create-account");
+    setError(null);
+    setSuccess(null);
+  };
+
   return (
     <main className="app-main setup-main">
       <section className="screen">
-        <ScreenHeader title="Habit Tracker" subtitle="sign in to sync" />
-        <form className="auth-card" onSubmit={(event) => handleAuth(event, "sign-in")}>
-          <h2>Email password login</h2>
-          <p>Use a password for MVP testing without magic-link email limits.</p>
-          <label htmlFor="login-email">email</label>
-          <input
-            id="login-email"
-            type="email"
-            value={email}
-            required
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="you@example.com"
-          />
-          <label htmlFor="login-password">password</label>
-          <input
-            id="login-password"
-            type="password"
-            value={password}
-            required
-            minLength={6}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="at least 6 characters"
-          />
-          {(error || authError) && <div className="error-panel">{error ?? authError}</div>}
-          {success && <div className="success-panel">{success}</div>}
-          <button className="primary-button" type="submit" disabled={loading}>
-            {loading ? "working..." : "sign in"}
-          </button>
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={loading}
-            onClick={(event) => handleAuth(event, "sign-up")}
-          >
-            create account
-          </button>
-          <button
-            className="text-button"
-            type="button"
-            disabled={loading}
-            onClick={handleResetPassword}
-          >
-            change password
-          </button>
-        </form>
+        <ScreenHeader
+          title="Habit Tracker"
+          subtitle={mode === "sign-in" ? "sign in to sync" : "create account"}
+        />
+        {mode === "sign-in" ? (
+          <form className="auth-card" onSubmit={handleSignIn}>
+            <h2>Email password login</h2>
+            <p>Use a password for MVP testing without magic-link email limits.</p>
+            <label htmlFor="login-email">email</label>
+            <input
+              id="login-email"
+              type="email"
+              value={email}
+              required
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@example.com"
+            />
+            <PasswordField
+              id="login-password"
+              label="password"
+              value={password}
+              disabled={loading}
+              onChange={setPassword}
+              placeholder="at least 6 characters"
+            />
+            {(error || authError) && <div className="error-panel">{error ?? authError}</div>}
+            {success && <div className="success-panel">{success}</div>}
+            <button className="primary-button" type="submit" disabled={loading}>
+              {loading ? "working..." : "sign in"}
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={loading}
+              onClick={showCreateAccount}
+            >
+              create account
+            </button>
+            <button
+              className="text-button"
+              type="button"
+              disabled={loading}
+              onClick={handleResetPassword}
+            >
+              change password
+            </button>
+          </form>
+        ) : (
+          <form className="auth-card" onSubmit={handleCreateAccount}>
+            <h2>Create an account</h2>
+            <p>Enter your email, password, and confirm the password.</p>
+            <label htmlFor="signup-email">email</label>
+            <input
+              id="signup-email"
+              type="email"
+              value={email}
+              required
+              disabled={loading}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@example.com"
+            />
+            <PasswordField
+              id="signup-password"
+              label="password"
+              value={password}
+              disabled={loading}
+              onChange={setPassword}
+              placeholder="at least 6 characters"
+            />
+            <PasswordField
+              id="signup-confirm-password"
+              label="confirm password"
+              value={confirmPassword}
+              disabled={loading}
+              onChange={setConfirmPassword}
+              placeholder="repeat password"
+            />
+            {(error || authError) && <div className="error-panel">{error ?? authError}</div>}
+            {success && <div className="success-panel">{success}</div>}
+            <button className="primary-button" type="submit" disabled={loading}>
+              {loading ? "creating..." : "create account"}
+            </button>
+            <button
+              className="text-button"
+              type="button"
+              disabled={loading}
+              onClick={showSignIn}
+            >
+              back to sign in
+            </button>
+          </form>
+        )}
       </section>
     </main>
   );
@@ -497,26 +571,20 @@ function ChangePasswordScreen({
         <form className="auth-card" onSubmit={submit}>
           <h2>New password</h2>
           <p>Enter a new password for this account.</p>
-          <label htmlFor="new-password">new password</label>
-          <input
+          <PasswordField
             id="new-password"
-            type="password"
+            label="new password"
             value={password}
-            required
-            minLength={6}
             disabled={loading}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={setPassword}
             placeholder="at least 6 characters"
           />
-          <label htmlFor="confirm-password">confirm password</label>
-          <input
+          <PasswordField
             id="confirm-password"
-            type="password"
+            label="confirm password"
             value={confirmPassword}
-            required
-            minLength={6}
             disabled={loading}
-            onChange={(event) => setConfirmPassword(event.target.value)}
+            onChange={setConfirmPassword}
             placeholder="repeat password"
           />
           {(error || authError) && <div className="error-panel">{error ?? authError}</div>}
@@ -1111,6 +1179,88 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 
 function EmptyPanel({ text }: { text: string }) {
   return <div className="empty-panel">{text}</div>;
+}
+
+function PasswordField({
+  id,
+  label,
+  value,
+  disabled,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  const [visible, setVisible] = useState(false);
+
+  return (
+    <div className="password-field">
+      <label htmlFor={id}>{label}</label>
+      <div className="password-input-wrap">
+        <input
+          id={id}
+          type={visible ? "text" : "password"}
+          value={value}
+          required
+          minLength={6}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+        />
+        <button
+          className="password-toggle"
+          type="button"
+          disabled={disabled}
+          aria-label={visible ? "Hide password" : "Show password"}
+          aria-pressed={visible}
+          onClick={() => setVisible((current) => !current)}
+        >
+          <EyeIcon hidden={visible} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EyeIcon({ hidden }: { hidden: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height="18"
+      viewBox="0 0 24 24"
+      width="18"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+      {hidden && (
+        <path
+          d="M4 20 20 4"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="1.8"
+        />
+      )}
+    </svg>
+  );
 }
 
 function SettingsRow({
