@@ -1,165 +1,281 @@
 import type { Habit, HabitLog, HabitTrackerData, MonthPlan } from "./types";
+import { supabase } from "./supabaseClient";
 import { getPreviousYearMonth } from "./utils/date";
 
-const STORAGE_KEY = "monthly-habit-tracker-data";
-
-const emptyData: HabitTrackerData = {
-  monthPlans: [],
-  habits: [],
-  habitLogs: [],
+type MonthPlanRow = {
+  id: string;
+  user_id: string;
+  year: number;
+  month: number;
+  created_at: string;
+  import_source_id: string | null;
 };
 
-export function loadTrackerData(): HabitTrackerData {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    return emptyData;
+type HabitRow = {
+  id: string;
+  user_id: string;
+  month_plan_id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+  import_source_id: string | null;
+};
+
+type HabitLogRow = {
+  id: string;
+  user_id: string;
+  habit_id: string;
+  date: string;
+  completed: boolean;
+  created_at: string;
+  updated_at: string;
+  import_source_id: string | null;
+};
+
+export async function loadTrackerData(): Promise<HabitTrackerData> {
+  const [monthPlansResult, habitsResult, habitLogsResult] = await Promise.all([
+    supabase
+      .from("month_plans")
+      .select("id,user_id,year,month,created_at,import_source_id")
+      .order("year", { ascending: false })
+      .order("month", { ascending: false }),
+    supabase
+      .from("habits")
+      .select("id,user_id,month_plan_id,name,sort_order,created_at,import_source_id")
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("habit_logs")
+      .select("id,user_id,habit_id,date,completed,created_at,updated_at,import_source_id"),
+  ]);
+
+  if (monthPlansResult.error) {
+    throw monthPlansResult.error;
   }
-
-  try {
-    const parsed = JSON.parse(raw) as HabitTrackerData;
-    return {
-      monthPlans: Array.isArray(parsed.monthPlans) ? parsed.monthPlans : [],
-      habits: Array.isArray(parsed.habits) ? parsed.habits : [],
-      habitLogs: Array.isArray(parsed.habitLogs) ? parsed.habitLogs : [],
-    };
-  } catch {
-    return emptyData;
+  if (habitsResult.error) {
+    throw habitsResult.error;
   }
-}
-
-export function saveTrackerData(data: HabitTrackerData): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-}
-
-export function clearTrackerData(): void {
-  localStorage.removeItem(STORAGE_KEY);
-}
-
-export function createMonthPlan(
-  data: HabitTrackerData,
-  year: number,
-  month: number,
-): { data: HabitTrackerData; plan: MonthPlan } {
-  const existing = findMonthPlan(data, year, month);
-  if (existing) {
-    return { data, plan: existing };
+  if (habitLogsResult.error) {
+    throw habitLogsResult.error;
   }
-
-  const plan: MonthPlan = {
-    id: createId(),
-    year,
-    month,
-    createdAt: new Date().toISOString(),
-  };
 
   return {
-    plan,
-    data: {
-      ...data,
-      monthPlans: [...data.monthPlans, plan],
-    },
+    monthPlans: (monthPlansResult.data ?? []).map(mapMonthPlan),
+    habits: (habitsResult.data ?? []).map(mapHabit),
+    habitLogs: (habitLogsResult.data ?? []).map(mapHabitLog),
   };
 }
 
-export function copyPreviousMonthHabits(
+export async function createMonthPlan(
+  _data: HabitTrackerData,
+  year: number,
+  month: number,
+): Promise<{ data: HabitTrackerData; plan: MonthPlan }> {
+  const row = await findOrCreateMonthPlan(year, month);
+  const data = await loadTrackerData();
+  return {
+    data,
+    plan: mapMonthPlan(row),
+  };
+}
+
+export async function copyPreviousMonthHabits(
   data: HabitTrackerData,
   targetYear: number,
   targetMonth: number,
-): { data: HabitTrackerData; plan: MonthPlan; copiedCount: number } {
+): Promise<{ data: HabitTrackerData; plan: MonthPlan; copiedCount: number }> {
   const previous = getPreviousYearMonth(targetYear, targetMonth);
   const previousPlan = findMonthPlan(data, previous.year, previous.month);
-  const previousHabits = previousPlan
-    ? getHabitsForPlan(data, previousPlan.id)
-    : [];
+  const previousHabits = previousPlan ? getHabitsForPlan(data, previousPlan.id) : [];
+  const targetPlanRow = await findOrCreateMonthPlan(targetYear, targetMonth);
+  const targetPlan = mapMonthPlan(targetPlanRow);
+  const targetHabits = getHabitsForPlan(data, targetPlan.id);
 
-  const created = createMonthPlan(data, targetYear, targetMonth);
-  const alreadyHasHabits = getHabitsForPlan(created.data, created.plan.id).length > 0;
+  if (targetHabits.length === 0 && previousHabits.length > 0) {
+    const userId = await getCurrentUserId();
+    const { error } = await supabase.from("habits").insert(
+      previousHabits.map((habit) => ({
+        user_id: userId,
+        month_plan_id: targetPlan.id,
+        name: habit.name,
+        sort_order: habit.sortOrder,
+      })),
+    );
 
-  if (alreadyHasHabits || previousHabits.length === 0) {
-    return {
-      data: created.data,
-      plan: created.plan,
-      copiedCount: alreadyHasHabits ? 0 : previousHabits.length,
-    };
+    if (error) {
+      throw error;
+    }
   }
 
-  const now = new Date().toISOString();
-  const copiedHabits = previousHabits.map((habit) => ({
-    id: createId(),
-    monthPlanId: created.plan.id,
-    name: habit.name,
-    sortOrder: habit.sortOrder,
-    createdAt: now,
-  }));
-
   return {
-    plan: created.plan,
-    copiedCount: copiedHabits.length,
-    data: {
-      ...created.data,
-      habits: [...created.data.habits, ...copiedHabits],
-    },
+    data: await loadTrackerData(),
+    plan: targetPlan,
+    copiedCount: targetHabits.length === 0 ? previousHabits.length : 0,
   };
 }
 
-export function addHabitToPlan(
+export async function addHabitToPlan(
   data: HabitTrackerData,
   monthPlanId: string,
   name: string,
-): { data: HabitTrackerData; habit: Habit } {
+): Promise<{ data: HabitTrackerData; habit: Habit }> {
+  const userId = await getCurrentUserId();
   const planHabits = getHabitsForPlan(data, monthPlanId);
-  const now = new Date().toISOString();
-  const habit: Habit = {
-    id: createId(),
-    monthPlanId,
-    name,
-    sortOrder: planHabits.length,
-    createdAt: now,
-  };
+  const { data: habitRow, error } = await supabase
+    .from("habits")
+    .insert({
+      user_id: userId,
+      month_plan_id: monthPlanId,
+      name,
+      sort_order: planHabits.length,
+    })
+    .select("id,user_id,month_plan_id,name,sort_order,created_at,import_source_id")
+    .single();
 
-  return {
-    habit,
-    data: {
-      ...data,
-      habits: [...data.habits, habit],
-    },
-  };
-}
-
-export function toggleHabitLog(
-  data: HabitTrackerData,
-  habitId: string,
-  date: string,
-): HabitTrackerData {
-  const existing = data.habitLogs.find(
-    (log) => log.habitId === habitId && log.date === date,
-  );
-  const now = new Date().toISOString();
-
-  if (!existing) {
-    const log: HabitLog = {
-      id: createId(),
-      habitId,
-      date,
-      completed: true,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    return {
-      ...data,
-      habitLogs: [...data.habitLogs, log],
-    };
+  if (error) {
+    throw error;
   }
 
   return {
-    ...data,
-    habitLogs: data.habitLogs.map((log) =>
-      log.id === existing.id
-        ? { ...log, completed: !log.completed, updatedAt: now }
-        : log,
-    ),
+    data: await loadTrackerData(),
+    habit: mapHabit(habitRow),
   };
+}
+
+export async function toggleHabitLog(
+  data: HabitTrackerData,
+  habitId: string,
+  date: string,
+): Promise<HabitTrackerData> {
+  const userId = await getCurrentUserId();
+  const existing = data.habitLogs.find(
+    (log) => log.habitId === habitId && log.date === date,
+  );
+
+  if (!existing) {
+    const { error } = await supabase.from("habit_logs").insert({
+      user_id: userId,
+      habit_id: habitId,
+      date,
+      completed: true,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return loadTrackerData();
+  }
+
+  const { error } = await supabase
+    .from("habit_logs")
+    .update({
+      completed: !existing.completed,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", existing.id);
+
+  if (error) {
+    throw error;
+  }
+
+  return loadTrackerData();
+}
+
+export async function clearTrackerData(): Promise<HabitTrackerData> {
+  const userId = await getCurrentUserId();
+  const { error } = await supabase.from("month_plans").delete().eq("user_id", userId);
+
+  if (error) {
+    throw error;
+  }
+
+  return loadTrackerData();
+}
+
+export async function importTrackerData(
+  localData: HabitTrackerData,
+): Promise<HabitTrackerData> {
+  const userId = await getCurrentUserId();
+  const monthPlanIdMap = new Map<string, string>();
+  const habitIdMap = new Map<string, string>();
+
+  const sortedPlans = [...localData.monthPlans].sort((a, b) => {
+    if (a.year !== b.year) {
+      return a.year - b.year;
+    }
+    return a.month - b.month;
+  });
+
+  for (const plan of sortedPlans) {
+    const { data, error } = await supabase
+      .from("month_plans")
+      .upsert(
+        {
+          user_id: userId,
+          year: plan.year,
+          month: plan.month,
+          import_source_id: `month_plan:${plan.id}`,
+        },
+        { onConflict: "user_id,year,month" },
+      )
+      .select("id,user_id,year,month,created_at,import_source_id")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+    monthPlanIdMap.set(plan.id, data.id);
+  }
+
+  const habitInserts = localData.habits
+    .filter((habit) => monthPlanIdMap.has(habit.monthPlanId))
+    .map((habit) => ({
+      user_id: userId,
+      month_plan_id: monthPlanIdMap.get(habit.monthPlanId)!,
+      name: habit.name,
+      sort_order: habit.sortOrder,
+      import_source_id: `habit:${habit.id}`,
+    }));
+
+  if (habitInserts.length > 0) {
+    const { data, error } = await supabase
+      .from("habits")
+      .upsert(habitInserts, { onConflict: "user_id,import_source_id" })
+      .select("id,user_id,month_plan_id,name,sort_order,created_at,import_source_id");
+
+    if (error) {
+      throw error;
+    }
+
+    for (const row of data ?? []) {
+      if (row.import_source_id?.startsWith("habit:")) {
+        habitIdMap.set(row.import_source_id.slice("habit:".length), row.id);
+      }
+    }
+  }
+
+  const logInserts = localData.habitLogs
+    .filter((log) => log.completed && habitIdMap.has(log.habitId))
+    .map((log) => ({
+      user_id: userId,
+      habit_id: habitIdMap.get(log.habitId)!,
+      date: log.date,
+      completed: true,
+      import_source_id: `habit_log:${log.id}`,
+    }));
+
+  if (logInserts.length > 0) {
+    const { error } = await supabase
+      .from("habit_logs")
+      .upsert(logInserts, { onConflict: "user_id,habit_id,date" });
+
+    if (error) {
+      throw error;
+    }
+  }
+
+  return loadTrackerData();
 }
 
 export function findMonthPlan(
@@ -212,10 +328,73 @@ export function exportTrackerData(data: HabitTrackerData): void {
   URL.revokeObjectURL(url);
 }
 
-function createId(): string {
-  if ("randomUUID" in crypto) {
-    return crypto.randomUUID();
+async function findOrCreateMonthPlan(
+  year: number,
+  month: number,
+): Promise<MonthPlanRow> {
+  const userId = await getCurrentUserId();
+  const { data, error } = await supabase
+    .from("month_plans")
+    .upsert(
+      {
+        user_id: userId,
+        year,
+        month,
+      },
+      { onConflict: "user_id,year,month" },
+    )
+    .select("id,user_id,year,month,created_at,import_source_id")
+    .single();
+
+  if (error) {
+    throw error;
   }
 
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return data;
+}
+
+async function getCurrentUserId(): Promise<string> {
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error) {
+    throw error;
+  }
+  if (!user) {
+    throw new Error("You must be signed in to update habits.");
+  }
+
+  return user.id;
+}
+
+function mapMonthPlan(row: MonthPlanRow): MonthPlan {
+  return {
+    id: row.id,
+    year: row.year,
+    month: row.month,
+    createdAt: row.created_at,
+  };
+}
+
+function mapHabit(row: HabitRow): Habit {
+  return {
+    id: row.id,
+    monthPlanId: row.month_plan_id,
+    name: row.name,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at,
+  };
+}
+
+function mapHabitLog(row: HabitLogRow): HabitLog {
+  return {
+    id: row.id,
+    habitId: row.habit_id,
+    date: row.date,
+    completed: row.completed,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }

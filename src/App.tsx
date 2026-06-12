@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useAuth } from "./auth";
 import {
   addHabitToPlan,
   clearTrackerData,
@@ -9,10 +10,18 @@ import {
   getHabitsForPlan,
   getLogsForHabits,
   getSortedMonthPlans,
+  importTrackerData,
   loadTrackerData,
-  saveTrackerData,
   toggleHabitLog,
 } from "./storage";
+import {
+  clearLocalTrackerData,
+  emptyTrackerData,
+  hasCompletedImport,
+  hasLocalTrackerData,
+  loadLocalTrackerData,
+  markImportComplete,
+} from "./localStorageImport";
 import type { Habit, HabitTrackerData, MonthPlan, TabKey } from "./types";
 import {
   formatLongDate,
@@ -36,26 +45,58 @@ const tabs: Array<{ key: TabKey; label: string; icon: string }> = [
   { key: "today", label: "Today", icon: "□" },
   { key: "month", label: "Month", icon: "■" },
   { key: "stats", label: "Stats", icon: "%" },
-  { key: "history", label: "History", icon: "◷" },
-  { key: "settings", label: "Settings", icon: "⚙" },
+  { key: "history", label: "History", icon: "o" },
+  { key: "settings", label: "Settings", icon: "*" },
 ];
 
 function App() {
-  const [data, setData] = useState<HabitTrackerData>(() => loadTrackerData());
+  const auth = useAuth();
+  const [data, setData] = useState<HabitTrackerData>(emptyTrackerData);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("today");
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [setupTarget, setSetupTarget] = useState<{ year: number; month: number } | null>(
     null,
   );
   const [showAddHabit, setShowAddHabit] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showImportPrompt, setShowImportPrompt] = useState(false);
+
+  const refreshData = useCallback(async () => {
+    setDataLoading(true);
+    setErrorMessage(null);
+    try {
+      const nextData = await loadTrackerData();
+      setData(nextData);
+      return nextData;
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+      return emptyTrackerData;
+    } finally {
+      setDataLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!auth.user) {
+      setData(emptyTrackerData);
+      setSelectedPlanId(null);
+      setShowImportPrompt(false);
+      return;
+    }
+
+    refreshData();
+
+    const localData = loadLocalTrackerData();
+    setShowImportPrompt(
+      hasLocalTrackerData(localData) && !hasCompletedImport(auth.user.id),
+    );
+  }, [auth.user, refreshData]);
 
   const todayDate = getTodayDate();
   const current = getCurrentYearMonth();
   const currentPlan = findMonthPlan(data, current.year, current.month);
-
-  useEffect(() => {
-    saveTrackerData(data);
-  }, [data]);
 
   useEffect(() => {
     if (!selectedPlanId && currentPlan) {
@@ -77,41 +118,58 @@ function App() {
 
   const targetForSetup =
     setupTarget ??
-    (!currentPlan && activeTab === "today"
+    (!dataLoading && !currentPlan && activeTab === "today"
       ? { year: current.year, month: current.month }
       : null);
 
-  const updateData = (nextData: HabitTrackerData) => {
-    setData(nextData);
+  const runMutation = async (
+    operation: () => Promise<HabitTrackerData | { data: HabitTrackerData; plan?: MonthPlan }>,
+  ) => {
+    setActionLoading(true);
+    setErrorMessage(null);
+    try {
+      const result = await operation();
+      const nextData = "data" in result ? result.data : result;
+      setData(nextData);
+      return result;
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+      return null;
+    } finally {
+      setActionLoading(false);
+    }
   };
 
-  const handleCreateEmptyMonth = (year: number, month: number) => {
-    const created = createMonthPlan(data, year, month);
-    updateData(created.data);
-    setSelectedPlanId(created.plan.id);
-    setSetupTarget(null);
-    setActiveTab("today");
+  const handleCreateEmptyMonth = async (year: number, month: number) => {
+    const created = await runMutation(() => createMonthPlan(data, year, month));
+    if (created && "plan" in created && created.plan) {
+      setSelectedPlanId(created.plan.id);
+      setSetupTarget(null);
+      setActiveTab("today");
+    }
   };
 
-  const handleCopyPrevious = (year: number, month: number) => {
-    const copied = copyPreviousMonthHabits(data, year, month);
-    updateData(copied.data);
-    setSelectedPlanId(copied.plan.id);
-    setSetupTarget(null);
-    setActiveTab("today");
+  const handleCopyPrevious = async (year: number, month: number) => {
+    const copied = await runMutation(() => copyPreviousMonthHabits(data, year, month));
+    if (copied && "plan" in copied && copied.plan) {
+      setSelectedPlanId(copied.plan.id);
+      setSetupTarget(null);
+      setActiveTab("today");
+    }
   };
 
-  const handleAddHabit = (name: string) => {
+  const handleAddHabit = async (name: string) => {
     if (!currentPlan) {
       return;
     }
-    const added = addHabitToPlan(data, currentPlan.id, name);
-    updateData(added.data);
-    setShowAddHabit(false);
+    const added = await runMutation(() => addHabitToPlan(data, currentPlan.id, name));
+    if (added) {
+      setShowAddHabit(false);
+    }
   };
 
-  const handleToggle = (habitId: string, date: string) => {
-    updateData(toggleHabitLog(data, habitId, date));
+  const handleToggle = async (habitId: string, date: string) => {
+    await runMutation(() => toggleHabitLog(data, habitId, date));
   };
 
   const openNextMonthSetup = () => {
@@ -122,11 +180,70 @@ function App() {
     setSetupTarget(target);
   };
 
+  const handleImportLocalData = async () => {
+    if (!auth.user) {
+      return;
+    }
+    const localData = loadLocalTrackerData();
+    const imported = await runMutation(() => importTrackerData(localData));
+    if (imported) {
+      markImportComplete(auth.user.id);
+      clearLocalTrackerData();
+      setShowImportPrompt(false);
+    }
+  };
+
+  const handleSkipImport = () => {
+    if (auth.user) {
+      markImportComplete(auth.user.id);
+    }
+    setShowImportPrompt(false);
+  };
+
+  const handleSignOut = async () => {
+    setErrorMessage(null);
+    try {
+      await auth.signOut();
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    }
+  };
+
+  if (auth.loading) {
+    return <LoadingScreen text="checking session" />;
+  }
+
+  if (!auth.user) {
+    return (
+      <LoginScreen
+        authError={auth.authError}
+        onSignIn={auth.signInWithMagicLink}
+      />
+    );
+  }
+
+  if (dataLoading) {
+    return <LoadingScreen text="loading cloud habits" />;
+  }
+
+  if (showImportPrompt) {
+    return (
+      <ImportPrompt
+        busy={actionLoading}
+        errorMessage={errorMessage}
+        onImport={handleImportLocalData}
+        onSkip={handleSkipImport}
+      />
+    );
+  }
+
   if (targetForSetup) {
     return (
       <NewMonthSetup
         target={targetForSetup}
         data={data}
+        busy={actionLoading}
+        errorMessage={errorMessage}
         onCopyPrevious={handleCopyPrevious}
         onStartEmpty={handleCreateEmptyMonth}
       />
@@ -136,18 +253,26 @@ function App() {
   return (
     <div className="app-shell">
       <main className="app-main">
+        {errorMessage && <div className="error-panel">{errorMessage}</div>}
+
         {activeTab === "today" && currentPlan && (
           <TodayTab
             plan={currentPlan}
             data={data}
             todayDate={todayDate}
+            busy={actionLoading}
             onAddHabit={() => setShowAddHabit(true)}
             onToggle={handleToggle}
           />
         )}
 
         {activeTab === "month" && selectedPlan && (
-          <MonthTab plan={selectedPlan} data={data} onToggle={handleToggle} />
+          <MonthTab
+            plan={selectedPlan}
+            data={data}
+            busy={actionLoading}
+            onToggle={handleToggle}
+          />
         )}
 
         {activeTab === "stats" && selectedPlan && (
@@ -168,6 +293,8 @@ function App() {
           <SettingsTab
             selectedPlan={selectedPlan}
             data={data}
+            userEmail={auth.user.email ?? "signed in"}
+            busy={actionLoading}
             onCopyLastMonth={() => {
               const anchor = selectedPlan ?? currentPlan;
               const target = anchor ?? { year: current.year, month: current.month };
@@ -175,14 +302,14 @@ function App() {
             }}
             onStartNewMonth={openNextMonthSetup}
             onExport={() => exportTrackerData(data)}
-            onClear={() => {
-              if (window.confirm("Clear all local habit data?")) {
-                clearTrackerData();
-                setData(loadTrackerData());
+            onClear={async () => {
+              if (window.confirm("Clear all cloud habit data for this account?")) {
+                await runMutation(() => clearTrackerData());
                 setSelectedPlanId(null);
                 setActiveTab("today");
               }
             }}
+            onSignOut={handleSignOut}
           />
         )}
       </main>
@@ -192,6 +319,7 @@ function App() {
       {showAddHabit && currentPlan && (
         <AddHabitModal
           plan={currentPlan}
+          busy={actionLoading}
           onClose={() => setShowAddHabit(false)}
           onSave={handleAddHabit}
         />
@@ -205,14 +333,121 @@ type PlanProps = {
   data: HabitTrackerData;
 };
 
+function LoginScreen({
+  authError,
+  onSignIn,
+}: {
+  authError: string | null;
+  onSignIn: (email: string) => Promise<void>;
+}) {
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      await onSignIn(email.trim());
+      setSent(true);
+    } catch (signInError) {
+      setError(getErrorMessage(signInError));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main className="app-main setup-main">
+      <section className="screen">
+        <ScreenHeader title="Habit Tracker" subtitle="sign in to sync" />
+        <form className="auth-card" onSubmit={submit}>
+          <h2>Magic link login</h2>
+          <p>Enter your email and Supabase will send a sign-in link.</p>
+          <label htmlFor="login-email">email</label>
+          <input
+            id="login-email"
+            type="email"
+            value={email}
+            required
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@example.com"
+          />
+          {(error || authError) && <div className="error-panel">{error ?? authError}</div>}
+          {sent && (
+            <div className="success-panel">
+              Magic link sent. Check your email, then return here.
+            </div>
+          )}
+          <button className="primary-button" type="submit" disabled={loading}>
+            {loading ? "sending..." : "send magic link"}
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function LoadingScreen({ text }: { text: string }) {
+  return (
+    <main className="app-main setup-main">
+      <section className="screen">
+        <ScreenHeader title="Habit Tracker" subtitle={text} />
+        <div className="intro-card">
+          <h2>Loading</h2>
+          <p>Cloud data is getting lined up.</p>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function ImportPrompt({
+  busy,
+  errorMessage,
+  onImport,
+  onSkip,
+}: {
+  busy: boolean;
+  errorMessage: string | null;
+  onImport: () => void;
+  onSkip: () => void;
+}) {
+  return (
+    <main className="app-main setup-main">
+      <section className="screen">
+        <ScreenHeader title="Import habits" subtitle="local data found" />
+        <div className="intro-card">
+          <h2>Move saved habits to Supabase?</h2>
+          <p>
+            Existing habits in this browser can be imported once into your signed-in
+            account.
+          </p>
+        </div>
+        {errorMessage && <div className="error-panel">{errorMessage}</div>}
+        <button className="primary-button setup-button" type="button" disabled={busy} onClick={onImport}>
+          {busy ? "importing..." : "import local habits"}
+        </button>
+        <button className="secondary-button setup-button" type="button" disabled={busy} onClick={onSkip}>
+          skip import
+        </button>
+      </section>
+    </main>
+  );
+}
+
 function TodayTab({
   plan,
   data,
   todayDate,
+  busy,
   onAddHabit,
   onToggle,
 }: PlanProps & {
   todayDate: string;
+  busy: boolean;
   onAddHabit: () => void;
   onToggle: (habitId: string, date: string) => void;
 }) {
@@ -246,6 +481,7 @@ function TodayTab({
               <button
                 className="habit-row"
                 key={habit.id}
+                disabled={busy}
                 onClick={() => onToggle(habit.id, todayDate)}
                 type="button"
               >
@@ -260,7 +496,7 @@ function TodayTab({
         )}
       </div>
 
-      <button className="primary-button" type="button" onClick={onAddHabit}>
+      <button className="primary-button" type="button" disabled={busy} onClick={onAddHabit}>
         + add habit
       </button>
     </section>
@@ -270,8 +506,12 @@ function TodayTab({
 function MonthTab({
   plan,
   data,
+  busy,
   onToggle,
-}: PlanProps & { onToggle: (habitId: string, date: string) => void }) {
+}: PlanProps & {
+  busy: boolean;
+  onToggle: (habitId: string, date: string) => void;
+}) {
   const habits = getHabitsForPlan(data, plan.id);
   const logs = getLogsForHabits(data, habits);
   const monthly = calculateMonthlyStats(habits, logs, plan.year, plan.month);
@@ -319,6 +559,7 @@ function MonthTab({
                   logs={logs}
                   plan={plan}
                   days={days}
+                  busy={busy}
                   onToggle={onToggle}
                 />
               ))}
@@ -328,7 +569,7 @@ function MonthTab({
         <p className="scroll-hint">← horizontally scroll to see all days →</p>
       </div>
 
-      <button className="primary-button" type="button">
+      <button className="primary-button" type="button" disabled>
         toggle any day
       </button>
     </section>
@@ -340,12 +581,14 @@ function MonthGridRow({
   logs,
   plan,
   days,
+  busy,
   onToggle,
 }: {
   habit: Habit;
   logs: HabitTrackerData["habitLogs"];
   plan: MonthPlan;
   days: number[];
+  busy: boolean;
   onToggle: (habitId: string, date: string) => void;
 }) {
   const percentage = calculateHabitPercentage(habit, logs, plan.year, plan.month);
@@ -361,6 +604,7 @@ function MonthGridRow({
             className={`dot-cell ${checked ? "active" : ""}`}
             key={date}
             type="button"
+            disabled={busy}
             aria-label={`${habit.name}, day ${day}, ${checked ? "done" : "todo"}`}
             onClick={() => onToggle(habit.id, date)}
           />
@@ -480,17 +724,23 @@ function HistoryTab({
 function SettingsTab({
   selectedPlan,
   data,
+  userEmail,
+  busy,
   onCopyLastMonth,
   onStartNewMonth,
   onExport,
   onClear,
+  onSignOut,
 }: {
   selectedPlan?: MonthPlan;
   data: HabitTrackerData;
+  userEmail: string;
+  busy: boolean;
   onCopyLastMonth: () => void;
   onStartNewMonth: () => void;
   onExport: () => void;
   onClear: () => void;
+  onSignOut: () => Promise<void>;
 }) {
   const label = selectedPlan
     ? getMonthYearLabel(selectedPlan.year, selectedPlan.month)
@@ -509,28 +759,35 @@ function SettingsTab({
     <section className="screen">
       <ScreenHeader title="Settings" subtitle="simple controls" />
 
+      <h2 className="section-title">Account</h2>
+      <div className="settings-list">
+        <SettingsRow label={userEmail} detail="signed in" />
+        <SettingsRow label="Sign out" disabled={busy} onClick={onSignOut} />
+      </div>
+
       <h2 className="section-title">Current month</h2>
       <div className="settings-list">
         <SettingsRow label={label} detail="active" />
         <SettingsRow
           label="Copy previous month"
           detail={previousDetail}
+          disabled={busy}
           onClick={onCopyLastMonth}
         />
-        <SettingsRow label="Start new month" onClick={onStartNewMonth} />
+        <SettingsRow label="Start new month" disabled={busy} onClick={onStartNewMonth} />
       </div>
 
       <h2 className="section-title">Preferences</h2>
       <div className="settings-list">
         <SettingsRow label="Typewriter font" detail="on" />
         <SettingsRow label="Minimal theme" detail="on" />
-        <SettingsRow label="Local storage" detail="on" />
+        <SettingsRow label="Supabase sync" detail="on" />
       </div>
 
       <h2 className="section-title">Data</h2>
       <div className="settings-list">
-        <SettingsRow label="Export data" onClick={onExport} />
-        <SettingsRow label="Clear local data" onClick={onClear} />
+        <SettingsRow label="Export data" disabled={busy} onClick={onExport} />
+        <SettingsRow label="Clear cloud data" disabled={busy} onClick={onClear} />
       </div>
     </section>
   );
@@ -539,11 +796,15 @@ function SettingsTab({
 function NewMonthSetup({
   target,
   data,
+  busy,
+  errorMessage,
   onCopyPrevious,
   onStartEmpty,
 }: {
   target: { year: number; month: number };
   data: HabitTrackerData;
+  busy: boolean;
+  errorMessage: string | null;
   onCopyPrevious: (year: number, month: number) => void;
   onStartEmpty: (year: number, month: number) => void;
 }) {
@@ -566,18 +827,20 @@ function NewMonthSetup({
             list.
           </p>
         </div>
+        {errorMessage && <div className="error-panel">{errorMessage}</div>}
 
         <button
           className="primary-button setup-button"
           type="button"
-          disabled={!previousPlan}
+          disabled={busy || !previousPlan}
           onClick={() => onCopyPrevious(target.year, target.month)}
         >
-          copy {previousLabel} habits
+          {busy ? "working..." : `copy ${previousLabel} habits`}
         </button>
         <button
           className="secondary-button setup-button"
           type="button"
+          disabled={busy}
           onClick={() => onStartEmpty(target.year, target.month)}
         >
           start empty
@@ -596,10 +859,12 @@ function NewMonthSetup({
 
 function AddHabitModal({
   plan,
+  busy,
   onClose,
   onSave,
 }: {
   plan: MonthPlan;
+  busy: boolean;
   onClose: () => void;
   onSave: (name: string) => void;
 }) {
@@ -636,12 +901,13 @@ function AddHabitModal({
           id="habit-name"
           autoFocus
           value={name}
+          disabled={busy}
           onChange={(event) => setName(event.target.value)}
           placeholder="Study English"
         />
         <p>daily checkbox habit</p>
-        <button className="primary-button" type="submit">
-          save habit
+        <button className="primary-button" type="submit" disabled={busy}>
+          {busy ? "saving..." : "save habit"}
         </button>
       </form>
     </div>
@@ -710,15 +976,17 @@ function EmptyPanel({ text }: { text: string }) {
 function SettingsRow({
   label,
   detail,
+  disabled,
   onClick,
 }: {
   label: string;
   detail?: string;
+  disabled?: boolean;
   onClick?: () => void;
 }) {
   if (onClick) {
     return (
-      <button className="settings-row" onClick={onClick} type="button">
+      <button className="settings-row" disabled={disabled} onClick={onClick} type="button">
         <span>{label}</span>
         <small>{detail ?? ">"}</small>
       </button>
@@ -755,6 +1023,13 @@ function BottomNav({
       ))}
     </nav>
   );
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return "Something went wrong.";
 }
 
 export default App;
