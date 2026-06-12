@@ -217,7 +217,8 @@ function App() {
     return (
       <LoginScreen
         authError={auth.authError}
-        onSignIn={auth.signInWithMagicLink}
+        onSignIn={auth.signInWithPassword}
+        onSignUp={auth.signUpWithPassword}
       />
     );
   }
@@ -336,24 +337,35 @@ type PlanProps = {
 function LoginScreen({
   authError,
   onSignIn,
+  onSignUp,
 }: {
   authError: string | null;
-  onSignIn: (email: string) => Promise<void>;
+  onSignIn: (email: string, password: string) => Promise<void>;
+  onSignUp: (email: string, password: string) => Promise<void>;
 }) {
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
-  const submit = async (event: FormEvent) => {
+  const handleAuth = async (
+    event: { preventDefault: () => void },
+    action: "sign-in" | "sign-up",
+  ) => {
     event.preventDefault();
     setLoading(true);
     setError(null);
+    setSuccess(null);
     try {
-      await onSignIn(email.trim());
-      setSent(true);
-    } catch (signInError) {
-      setError(getErrorMessage(signInError));
+      if (action === "sign-up") {
+        await onSignUp(email.trim(), password);
+        setSuccess("Account created. You are signed in.");
+      } else {
+        await onSignIn(email.trim(), password);
+      }
+    } catch (authActionError) {
+      setError(getErrorMessage(authActionError));
     } finally {
       setLoading(false);
     }
@@ -363,9 +375,9 @@ function LoginScreen({
     <main className="app-main setup-main">
       <section className="screen">
         <ScreenHeader title="Habit Tracker" subtitle="sign in to sync" />
-        <form className="auth-card" onSubmit={submit}>
-          <h2>Magic link login</h2>
-          <p>Enter your email and Supabase will send a sign-in link.</p>
+        <form className="auth-card" onSubmit={(event) => handleAuth(event, "sign-in")}>
+          <h2>Email password login</h2>
+          <p>Use a password for MVP testing without magic-link email limits.</p>
           <label htmlFor="login-email">email</label>
           <input
             id="login-email"
@@ -375,14 +387,28 @@ function LoginScreen({
             onChange={(event) => setEmail(event.target.value)}
             placeholder="you@example.com"
           />
+          <label htmlFor="login-password">password</label>
+          <input
+            id="login-password"
+            type="password"
+            value={password}
+            required
+            minLength={6}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="at least 6 characters"
+          />
           {(error || authError) && <div className="error-panel">{error ?? authError}</div>}
-          {sent && (
-            <div className="success-panel">
-              Magic link sent. Check your email, then return here.
-            </div>
-          )}
+          {success && <div className="success-panel">{success}</div>}
           <button className="primary-button" type="submit" disabled={loading}>
-            {loading ? "sending..." : "send magic link"}
+            {loading ? "working..." : "sign in"}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={loading}
+            onClick={(event) => handleAuth(event, "sign-up")}
+          >
+            create account
           </button>
         </form>
       </section>

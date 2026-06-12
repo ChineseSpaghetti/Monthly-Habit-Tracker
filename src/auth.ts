@@ -6,7 +6,8 @@ export type AuthState = {
   loading: boolean;
   user: User | null;
   authError: string | null;
-  signInWithMagicLink: (email: string) => Promise<void>;
+  signInWithPassword: (email: string, password: string) => Promise<void>;
+  signUpWithPassword: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -17,6 +18,13 @@ export function useAuth(): AuthState {
 
   useEffect(() => {
     let active = true;
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const urlAuthError = hashParams.get("error_description");
+
+    if (urlAuthError) {
+      setAuthError(urlAuthError.replace(/\+/g, " "));
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
 
     supabase.auth.getSession().then(({ data, error }) => {
       if (!active) {
@@ -42,13 +50,24 @@ export function useAuth(): AuthState {
     };
   }, []);
 
-  const signInWithMagicLink = async (email: string) => {
+  const signInWithPassword = async (email: string, password: string) => {
     setAuthError(null);
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
-      options: {
-        emailRedirectTo: window.location.origin,
-      },
+      password,
+    });
+
+    if (error) {
+      setAuthError(error.message);
+      throw error;
+    }
+  };
+
+  const signUpWithPassword = async (email: string, password: string) => {
+    setAuthError(null);
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
     });
 
     if (error) {
@@ -70,7 +89,8 @@ export function useAuth(): AuthState {
     loading,
     user,
     authError,
-    signInWithMagicLink,
+    signInWithPassword,
+    signUpWithPassword,
     signOut,
   };
 }
