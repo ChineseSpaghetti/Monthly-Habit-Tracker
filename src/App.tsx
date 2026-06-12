@@ -501,6 +501,9 @@ function SettingsTab({
   const previousPlan = previous
     ? findMonthPlan(data, previous.year, previous.month)
     : undefined;
+  const previousDetail = previousPlan && previous
+    ? getMonthYearLabel(previous.year, previous.month)
+    : "no previous";
 
   return (
     <section className="screen">
@@ -511,7 +514,7 @@ function SettingsTab({
         <SettingsRow label={label} detail="active" />
         <SettingsRow
           label="Copy previous month"
-          detail={previousPlan ? getMonthYearLabel(previous.year, previous.month) : "no previous"}
+          detail={previousDetail}
           onClick={onCopyLastMonth}
         />
         <SettingsRow label="Start new month" onClick={onStartNewMonth} />
