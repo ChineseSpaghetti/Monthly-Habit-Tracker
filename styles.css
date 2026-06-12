@@ -89,8 +89,11 @@ button {
 
 .progress-panel,
 .intro-card,
+.auth-card,
 .grid-card,
 .empty-panel,
+.error-panel,
+.success-panel,
 .note-panel,
 .metric-card {
   border: 1px solid var(--line);
@@ -234,10 +237,32 @@ button {
   cursor: not-allowed;
 }
 
+button:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .secondary-button {
   background: var(--surface);
   color: var(--ink);
   border-color: var(--line);
+}
+
+.text-button {
+  align-self: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.text-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .grid-card {
@@ -460,10 +485,23 @@ button {
   padding: 28px 20px 34px;
 }
 
+.auth-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 28px 20px 22px;
+}
+
 .intro-card h2 {
   margin: 0 0 13px;
   font-size: 20px;
   line-height: 1.25;
+}
+
+.auth-card h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
 }
 
 .intro-card p {
@@ -471,6 +509,46 @@ button {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.55;
+}
+
+.auth-card p,
+.auth-card label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.auth-card input {
+  width: 100%;
+  min-height: 56px;
+  padding: 0 17px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  outline: none;
+}
+
+.auth-card input:focus {
+  border-color: var(--ink);
+}
+
+.error-panel,
+.success-panel {
+  padding: 13px 16px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.error-panel {
+  border-color: #b85b5b;
+  color: #7d2929;
+}
+
+.success-panel {
+  border-color: #9fb590;
+  color: #405c34;
 }
 
 .setup-button {
