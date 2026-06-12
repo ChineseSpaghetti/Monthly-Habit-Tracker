@@ -142,6 +142,37 @@ export async function addHabitToPlan(
   };
 }
 
+export async function updateHabitName(
+  habitId: string,
+  name: string,
+): Promise<{ data: HabitTrackerData; habit: Habit }> {
+  const { data: habitRow, error } = await supabase
+    .from("habits")
+    .update({ name })
+    .eq("id", habitId)
+    .select("id,user_id,month_plan_id,name,sort_order,created_at,import_source_id")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return {
+    data: await loadTrackerData(),
+    habit: mapHabit(habitRow),
+  };
+}
+
+export async function deleteHabit(habitId: string): Promise<HabitTrackerData> {
+  const { error } = await supabase.from("habits").delete().eq("id", habitId);
+
+  if (error) {
+    throw error;
+  }
+
+  return loadTrackerData();
+}
+
 export async function toggleHabitLog(
   data: HabitTrackerData,
   habitId: string,

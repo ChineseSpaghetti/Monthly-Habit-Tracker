@@ -5,6 +5,7 @@ import {
   clearTrackerData,
   copyPreviousMonthHabits,
   createMonthPlan,
+  deleteHabit,
   exportTrackerData,
   findMonthPlan,
   getHabitsForPlan,
@@ -13,6 +14,7 @@ import {
   importTrackerData,
   loadTrackerData,
   toggleHabitLog,
+  updateHabitName,
 } from "./storage";
 import {
   clearLocalTrackerData,
@@ -60,6 +62,7 @@ function App() {
     null,
   );
   const [showAddHabit, setShowAddHabit] = useState(false);
+  const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showImportPrompt, setShowImportPrompt] = useState(false);
 
@@ -168,6 +171,24 @@ function App() {
     }
   };
 
+  const handleUpdateHabit = async (habitId: string, name: string) => {
+    const updated = await runMutation(() => updateHabitName(habitId, name));
+    if (updated) {
+      setEditingHabit(null);
+    }
+  };
+
+  const handleDeleteHabit = async (habit: Habit) => {
+    if (!window.confirm(`Delete "${habit.name}" and its logs?`)) {
+      return;
+    }
+
+    if (editingHabit?.id === habit.id) {
+      setEditingHabit(null);
+    }
+    await runMutation(() => deleteHabit(habit.id));
+  };
+
   const handleToggle = async (habitId: string, date: string) => {
     await runMutation(() => toggleHabitLog(data, habitId, date));
   };
@@ -273,6 +294,8 @@ function App() {
             todayDate={todayDate}
             busy={actionLoading}
             onAddHabit={() => setShowAddHabit(true)}
+            onDeleteHabit={handleDeleteHabit}
+            onEditHabit={setEditingHabit}
             onToggle={handleToggle}
           />
         )}
@@ -328,11 +351,25 @@ function App() {
       <BottomNav activeTab={activeTab} onChange={setActiveTab} />
 
       {showAddHabit && currentPlan && (
-        <AddHabitModal
+        <HabitFormModal
           plan={currentPlan}
+          title="Add habit"
+          submitLabel="save habit"
           busy={actionLoading}
           onClose={() => setShowAddHabit(false)}
           onSave={handleAddHabit}
+        />
+      )}
+
+      {editingHabit && currentPlan && (
+        <HabitFormModal
+          plan={currentPlan}
+          title="Edit habit"
+          submitLabel="save changes"
+          initialName={editingHabit.name}
+          busy={actionLoading}
+          onClose={() => setEditingHabit(null)}
+          onSave={(name) => handleUpdateHabit(editingHabit.id, name)}
         />
       )}
     </div>
@@ -651,11 +688,15 @@ function TodayTab({
   todayDate,
   busy,
   onAddHabit,
+  onDeleteHabit,
+  onEditHabit,
   onToggle,
 }: PlanProps & {
   todayDate: string;
   busy: boolean;
   onAddHabit: () => void;
+  onDeleteHabit: (habit: Habit) => void;
+  onEditHabit: (habit: Habit) => void;
   onToggle: (habitId: string, date: string) => void;
 }) {
   const habits = getHabitsForPlan(data, plan.id);
@@ -685,19 +726,38 @@ function TodayTab({
           habits.map((habit) => {
             const checked = isCompletedOnDate(logs, habit.id, todayDate);
             return (
-              <button
-                className="habit-row"
-                key={habit.id}
-                disabled={busy}
-                onClick={() => onToggle(habit.id, todayDate)}
-                type="button"
-              >
+              <div className="habit-row" key={habit.id}>
+                <button
+                  className="habit-main"
+                  disabled={busy}
+                  onClick={() => onToggle(habit.id, todayDate)}
+                  type="button"
+                >
                 <span className={`check-box ${checked ? "checked" : ""}`}>
                   {checked ? "✓" : ""}
                 </span>
-                <span className="habit-name">{habit.name}</span>
-                <span className="habit-state">{checked ? "done" : "todo"}</span>
-              </button>
+                  <span className="habit-name">{habit.name}</span>
+                  <span className="habit-state">{checked ? "done" : "todo"}</span>
+                </button>
+                <div className="habit-actions">
+                  <button
+                    className="mini-text-button"
+                    disabled={busy}
+                    onClick={() => onEditHabit(habit)}
+                    type="button"
+                  >
+                    edit
+                  </button>
+                  <button
+                    className="mini-text-button danger"
+                    disabled={busy}
+                    onClick={() => onDeleteHabit(habit)}
+                    type="button"
+                  >
+                    delete
+                  </button>
+                </div>
+              </div>
             );
           })
         )}
@@ -1064,18 +1124,24 @@ function NewMonthSetup({
   );
 }
 
-function AddHabitModal({
+function HabitFormModal({
   plan,
+  title,
+  submitLabel,
+  initialName = "",
   busy,
   onClose,
   onSave,
 }: {
   plan: MonthPlan;
+  title: string;
+  submitLabel: string;
+  initialName?: string;
   busy: boolean;
   onClose: () => void;
   onSave: (name: string) => void;
 }) {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -1102,7 +1168,7 @@ function AddHabitModal({
         onSubmit={submit}
         onClick={(event) => event.stopPropagation()}
       >
-        <h2>Add habit</h2>
+        <h2>{title}</h2>
         <label htmlFor="habit-name">habit name</label>
         <input
           id="habit-name"
@@ -1114,7 +1180,7 @@ function AddHabitModal({
         />
         <p>daily checkbox habit</p>
         <button className="primary-button" type="submit" disabled={busy}>
-          {busy ? "saving..." : "save habit"}
+          {busy ? "saving..." : submitLabel}
         </button>
       </form>
     </div>

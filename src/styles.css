@@ -170,16 +170,25 @@ button {
 }
 
 .habit-row {
+  min-height: 55px;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  text-align: left;
+}
+
+.habit-main {
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  min-height: 55px;
   width: 100%;
-  padding: 13px 18px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
+  min-height: 55px;
+  padding: 13px 18px 8px;
+  border: 0;
+  background: transparent;
   text-align: left;
 }
 
@@ -206,15 +215,35 @@ button {
 }
 
 .habit-name {
-  overflow: hidden;
   font-size: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .habit-state {
   color: var(--muted);
   font-size: 12px;
+}
+
+.habit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 18px;
+  padding: 0 18px 13px;
+}
+
+.mini-text-button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.mini-text-button.danger {
+  color: #8f2727;
 }
 
 .primary-button,
@@ -361,9 +390,8 @@ input:disabled {
 
 .metric-card {
   min-width: 0;
-  min-height: 78px;
+  min-height: 88px;
   padding: 17px 18px;
-  overflow: hidden;
 }
 
 .metric-card span {
@@ -376,11 +404,9 @@ input:disabled {
 .metric-card strong {
   display: block;
   margin-top: 14px;
-  overflow: hidden;
   font-size: 18px;
   line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .score-list {
